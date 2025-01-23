@@ -1,13 +1,13 @@
-@testable import MyLibrary
+@testable import SwiftFlux
 import Testing
 
 @Test func example() async throws {
     // Write your test here and use APIs like `#expect(...)` to check expected conditions.
 }
 
-@testable import SwiftFlux
 import XCTest
 
+@MainActor
 final class StoreTests: XCTestCase {
     struct TestState: Equatable {
         var count: Int = 0
@@ -20,7 +20,7 @@ final class StoreTests: XCTestCase {
         case asyncAction
     }
 
-    func testBasicStateManagement() {
+    func testBasicStateManagement() async {
         let store = Store<TestState, TestAction>(
             initialState: TestState(),
             reducer: { state, action in
@@ -42,23 +42,46 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(store.count, 1)
     }
 
-    func testEffects() {
+    func testFetchData() async {
+        let myClass = MyClass()
+
+        let expectation = XCTestExpectation(description: "fetchData completion called")
+
+        var result: String?
+        myClass.fetchData { data in
+            Task { @MainActor in
+                result = data
+                expectation.fulfill()
+            }
+        }
+
+        await fulfillment(of: [expectation], timeout: 1.0)
+        XCTAssertEqual(result, "Hello, World!")
+    }
+
+    func testEffects() async {
         let expectation = expectation(description: "Async effect")
 
         let store = Store<TestState, TestAction>(
             initialState: TestState(),
-            reducer: { _, action in
+            reducer: { state, action in
                 switch action {
                 case .increment:
                     return .none()
-                case .setText:
+                case .setText(let text):
+                    state.text = text
                     return .none()
                 case .asyncAction:
                     return .run { send in
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            send(.setText("Updated"))
-                            expectation.fulfill()
+                        if #available(iOS 16.0, *) {
+                            try? await Task.sleep(for: .seconds(0.1))
+                        } else {
+                            // Fallback on earlier versions
+                            try? await Task.sleep(nanoseconds: 1_000_000_000)
                         }
+
+                        send(.setText("Updated"))
+                        expectation.fulfill()
                     }
                 }
             }
@@ -66,13 +89,13 @@ final class StoreTests: XCTestCase {
 
         store.send(.asyncAction)
 
-        waitForExpectations(timeout: 1) { error in
-            XCTAssertNil(error)
-            XCTAssertEqual(store.text, "Updated")
-        }
+        await fulfillment(of: [expectation], timeout: 1.0)
+        XCTAssertEqual(store.text, "Updated")
     }
 
-    func testCombinedEffects() {
+    func testCombinedEffects() async {
+        let expectation = expectation(description: "Combines multiple effects ")
+
         let store = Store<TestState, TestAction>(
             initialState: TestState(),
             reducer: { state, action in
@@ -84,14 +107,40 @@ final class StoreTests: XCTestCase {
                     state.text = text
                     return .none()
                 case .asyncAction:
-                    return .none()
+                    return .combine(
+                        .send(.increment),
+                        .run { send in
+                            try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+                            send(.setText("Updated"))
+                        },
+                        .run { send in
+                            try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+                            send(.setText("Updated"))
+                            expectation.fulfill()
+                        }
+                    )
                 }
             }
         )
 
-        store.send(.increment)
+        XCTAssertEqual(store.count, 0)
+        store.send(.asyncAction)
 
         XCTAssertEqual(store.count, 1)
         XCTAssertEqual(store.text, "Incremented")
+
+        await fulfillment(of: [expectation], timeout: 3.0)
+        XCTAssertEqual(store.text, "Updated")
+    }
+}
+
+@MainActor
+class MyClass {
+    func fetchData(completion: @escaping @Sendable (String) -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            completion("Hello, World!")
+        }
     }
 }

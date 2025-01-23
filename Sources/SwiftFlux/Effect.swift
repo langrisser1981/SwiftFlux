@@ -9,15 +9,15 @@ import Foundation
 
 public struct Effect<Action> {
     /// Type alias for the action sending function
-    public typealias Send = (Action) -> Void
+    public typealias Send = @MainActor (Action) -> Void
 
     /// Synchronous actions to be executed
     let actions: [Action]
 
     /// Asynchronous side effects to be executed
-    let sideEffects: [(Send) -> Void]
+    let sideEffects: [(Send) async throws -> Void]
 
-    private init(actions: [Action] = [], sideEffects: [(Send) -> Void] = []) {
+    private init(actions: [Action] = [], sideEffects: [(Send) async throws -> Void] = []) {
         self.actions = actions
         self.sideEffects = sideEffects
     }
@@ -45,7 +45,7 @@ public struct Effect<Action> {
     /// Creates an effect that performs an asynchronous operation
     /// - Parameter operation: The async operation to perform
     /// - Returns: An effect containing the operation
-    public static func run(_ operation: @escaping (Send) -> Void) -> Effect {
+    public static func run(_ operation: @escaping (Send) async throws -> Void) -> Effect {
         Effect(sideEffects: [operation])
     }
 

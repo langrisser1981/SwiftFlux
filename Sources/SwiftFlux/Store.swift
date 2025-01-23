@@ -42,7 +42,7 @@ public final class Store<State, Action>: StoreType {
     public func publisher<Value>(for keyPath: KeyPath<State, Value>) -> AnyPublisher<Value, Never> {
         $state
             .map { $0[keyPath: keyPath] }
-            .removeDuplicates(where: ==)
+//            .removeDuplicates(by: ==)
             .eraseToAnyPublisher()
     }
 
@@ -53,15 +53,19 @@ public final class Store<State, Action>: StoreType {
 
         // Handle synchronous actions
         for action in effect.actions {
-            DispatchQueue.main.async { [weak self] in
-                self?.send(action)
-            }
+            self.send(action)
         }
 
         // Handle asynchronous side effects
         for sideEffect in effect.sideEffects {
-            sideEffect { [weak self] action in
-                self?.send(action)
+            Task {
+                do {
+                    try await sideEffect { [weak self] action in
+                        self?.send(action)
+                    }
+                } catch {
+                    print("出現錯誤 ： \(error)")
+                }
             }
         }
     }

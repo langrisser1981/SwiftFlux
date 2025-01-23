@@ -9,6 +9,7 @@ import Combine
 import Foundation
 
 /// A protocol defining the core functionality of a Store
+@MainActor
 public protocol StoreType: ObservableObject {
     associatedtype State
     associatedtype Action
