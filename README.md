@@ -4,10 +4,12 @@ A lightweight, type-safe Redux/Flux implementation for Swift applications, focus
 
 ## Features
 - Type-safe state management
-- Composable effects
-- Support for async operations
+- Composable effects with async/await support
+- Powerful effect system for side effects handling
 - Simple dependency injection
 - Easy integration with UIKit/SwiftUI
+- Thread-safe action dispatching
+- Automatic main thread synchronization
 
 ## Version History
 
@@ -62,16 +64,17 @@ typealias Reducer = (inout State, Action) -> Effect
 - Combined middleware and effects
 - Added support for async/await
 - Enhanced composability with Effect.combine
+- Thread-safe action dispatching
 ```swift
-struct Effect {
-    typealias Send = (Action) -> Void
+struct Effect<Action> {
+    typealias Send = @MainActor (Action) -> Void
     let actions: [Action]
-    let sideEffects: [(Send) -> Void]
+    let sideEffects: [(Send) async throws -> Void]
     
     static func none() -> Effect
     static func send(_ action: Action) -> Effect
     static func batch(_ actions: Action...) -> Effect
-    static func run(_ operation: @escaping (Send) -> Void) -> Effect
+    static func run(_ operation: @escaping (Send) async throws -> Void) -> Effect
     static func combine(_ effects: Effect...) -> Effect
 }
 ```
@@ -88,21 +91,28 @@ dependencies: [
 
 ## Basic Usage
 
+### State and Actions
 ```swift
 // Define your state
 struct AppState {
     var count = 0
-    var data = ""
+    var isLoading = false
+    var error: Error?
+    var data: String?
 }
 
 // Define your actions
 enum AppAction {
     case increment
-    case fetchData
+    case incrementAsync
+    case setLoading(Bool)
+    case setError(Error?)
     case setData(String)
 }
+```
 
-// Create the store
+### Reducer with Effects
+```swift
 let store = Store<AppState, AppAction>(
     initialState: AppState(),
     reducer: { state, action in
@@ -111,16 +121,26 @@ let store = Store<AppState, AppAction>(
             state.count += 1
             return .none()
             
-        case .fetchData:
-            return .combine(
-                .send(.setData("Loading...")),
-                .run { send in
-                    Task {
-                        let data = try await fetchData()
-                        send(.setData(data))
-                    }
+        case .incrementAsync:
+            state.isLoading = true
+            return .run { send in
+                do {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                    await send(.increment)
+                    await send(.setLoading(false))
+                } catch {
+                    await send(.setError(error))
                 }
-            )
+            }
+            
+        case .setLoading(let isLoading):
+            state.isLoading = isLoading
+            return .none()
+            
+        case .setError(let error):
+            state.error = error
+            state.isLoading = false
+            return .none()
             
         case .setData(let data):
             state.data = data
@@ -132,29 +152,71 @@ let store = Store<AppState, AppAction>(
 
 ## Advanced Usage
 
-### Combining Effects
+### Composing Effects
 ```swift
+// 組合多個 Effect
 case .userLoggedIn(let user):
     return .combine(
         .send(.setUser(user)),
-        .send(.loadUserPreferences),
+        .send(.setLoading(true)),
         .run { send in
-            Task {
-                let data = try await fetchUserData()
-                send(.setUserData(data))
+            do {
+                let preferences = try await fetchUserPreferences(user.id)
+                let data = try await fetchUserData(user.id)
+                await send(.setUserPreferences(preferences))
+                await send(.setUserData(data))
+            } catch {
+                await send(.setError(error))
             }
+            await send(.setLoading(false))
         }
     )
 ```
 
-### View Controller Integration
+### SwiftUI Integration
 ```swift
-class MyViewController: BaseViewController<Store<AppState, AppAction>, AppState, AppAction> {
+struct CounterView: View {
+    @ObservedObject var store: Store<AppState, AppAction>
+    
+    var body: some View {
+        VStack {
+            Text("Count: \(store.state.count)")
+            if store.state.isLoading {
+                ProgressView()
+            }
+            Button("Increment") {
+                store.send(.increment)
+            }
+            Button("Async Increment") {
+                store.send(.incrementAsync)
+            }
+        }
+    }
+}
+```
+
+### UIKit Integration
+```swift
+class CounterViewController: BaseViewController<Store<AppState, AppAction>, AppState, AppAction> {
     override func viewDidLoad() {
         super.viewDidLoad()
+        
+        // 觀察特定狀態變化
         observe(\.count) { [weak self] count in
-            self?.updateUI(with: count)
+            self?.countLabel.text = "Count: \(count)"
         }
+        
+        observe(\.isLoading) { [weak self] isLoading in
+            self?.loadingIndicator.isHidden = !isLoading
+        }
+    }
+    
+    @objc func incrementTapped() {
+        store.send(.increment)
+    }
+    
+    @objc func incrementAsyncTapped() {
+        store.send(.incrementAsync)
     }
 }
 ```
@@ -163,19 +225,19 @@ class MyViewController: BaseViewController<Store<AppState, AppAction>, AppState,
 ```
 SwiftFlux/
 ├── Sources/
-│   ├── Store.swift
-│   ├── Effect.swift
-│   ├── StoreType.swift
-│   └── BaseViewController.swift
+│   ├── Store.swift         # 核心 Store 實作
+│   ├── Effect.swift        # Effect 系統實作
+│   ├── StoreType.swift     # Store 協定定義
+│   └── BaseViewController.swift  # UIKit 整合基礎類別
 ├── Tests/
-│   └── StoreTests.swift
+│   └── StoreTests.swift    # 單元測試
 └── Examples/
-    ├── Counter/
-    └── TodoList/
+    ├── Counter/           # 計數器範例
+    └── TodoList/          # 待辦事項清單範例
 ```
 
 ## Contributing
-Contributions are welcome! Please feel free to submit a Pull Request.
+歡迎貢獻！請隨時提交 Pull Request。
 
 ## License
-This project is licensed under the MIT License - see the LICENSE file for details.
+本專案使用 MIT 授權條款 - 詳見 LICENSE 檔案。
