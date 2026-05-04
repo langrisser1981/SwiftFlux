@@ -42,7 +42,16 @@ public final class Store<State, Action>: StoreType {
     public func publisher<Value>(for keyPath: KeyPath<State, Value>) -> AnyPublisher<Value, Never> {
         $state
             .map { $0[keyPath: keyPath] }
-//            .removeDuplicates(by: ==)
+            .eraseToAnyPublisher()
+    }
+
+    /// Creates a publisher for a specific key path of the state, suppressing duplicate values
+    /// - Parameter keyPath: The key path to observe
+    /// - Returns: A publisher that emits only when the specified value actually changes
+    public func publisher<Value: Equatable>(for keyPath: KeyPath<State, Value>) -> AnyPublisher<Value, Never> {
+        $state
+            .map { $0[keyPath: keyPath] }
+            .removeDuplicates()
             .eraseToAnyPublisher()
     }
 
