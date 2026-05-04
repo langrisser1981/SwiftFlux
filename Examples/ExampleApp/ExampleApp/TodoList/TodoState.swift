@@ -61,6 +61,8 @@ public enum TodoAction {
     case loadItems
     /// 設定待辦事項清單
     case setItems([TodoItem])
+    /// 追加單一待辦事項
+    case appendItem(TodoItem)
     /// 延遲儲存待辦事項
     case saveItem(TodoItem)
     /// 批次新增待辦事項
@@ -159,6 +161,10 @@ public func todoReducer(state: inout TodoState, action: TodoAction) -> Effect<To
         state.items = items
         return .none()
 
+    case let .appendItem(item):
+        state.items.append(item)
+        return .none()
+
     case let .saveItem(item):
         // 延遲儲存待辦事項
         return .run { send in
@@ -170,19 +176,17 @@ public func todoReducer(state: inout TodoState, action: TodoAction) -> Effect<To
         }
 
     case let .batchAdd(titles):
-        // 批次新增待辦事項
         return .combine(
             .send(.setLoading(true)),
-            .run { [state] send in
+            .run { send in
                 for title in titles {
                     let item = TodoItem(title: title)
-                    await send(.setItems(state.items + [item]))
-                    try await mockSaveItem(item)
-//                    do {
-//                        try await mocksaveitem(item)
-//                    } catch {
-//                        await send(.seterror("儲存失敗，請稍後再試"))
-//                    }
+                    await send(.appendItem(item))
+                    do {
+                        try await mockSaveItem(item)
+                    } catch {
+                        await send(.setError("儲存失敗，請稍後再試"))
+                    }
                 }
                 await send(.setLoading(false))
             }
